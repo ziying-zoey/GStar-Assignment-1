@@ -1,4 +1,3 @@
-# problem_8.py
 import torch
 import triton
 import triton.language as tl
@@ -228,14 +227,9 @@ class FlashAttention2Function(torch.autograd.Function):
 
                     # dV += P^T @ dO
                     dv_blk_total[start:end] += P_blk.T @ dO
-
-                    # **关键修正**：dS = P ⊙ (dO @ V^T - delta)
                     t1 = dO @ V_blk.T                                        # [S,BN]
                     dS_blk = P_blk * (t1 - delta[:, None])                   # [S,BN]
-
-                    # dQ += dS @ K * scale2
                     dq_blk += dS_blk @ K_blk * scale
-                    # dK += dS^T @ Q * scale2
                     dk_blk_total[start:end] += (dS_blk.T @ Q) * scale
 
                 dq[b, hq] = dq_blk.to(q.dtype)

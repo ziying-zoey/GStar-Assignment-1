@@ -157,7 +157,6 @@ def _flash_attention_forward_swa_kernel(
     o_ptrs = (O_ptr + b * o_stride_b + hq * o_stride_h
               + (q_rows[:, None] * o_stride_s + d[None, :]))
     tl.store(o_ptrs, o.to(O_ptr.dtype.element_ty), mask=(q_rows[:, None] < SEQ_LEN))
-    # 写 M（行最大）
     m_ptrs = M_ptr + b * m_stride_b + hq * m_stride_h + q_rows * m_stride_s
     tl.store(m_ptrs, m_i, mask=(q_rows < SEQ_LEN))
 
