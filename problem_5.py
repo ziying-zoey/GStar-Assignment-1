@@ -86,7 +86,7 @@ def _flash_attention_forward_gqa_kernel(
 
         p_ij = tl.exp2(s_ij - m_new[:, None])                                     # [BM, BN]
 
-        acc += tl.dot(p_ij, v_block.to(tl.float32))                # [BM, D]
+        acc += tl.dot(p_ij.to(tl.float16), v_block.to(tl.float16)).to(tl.float32) # [BLOCK_M, HEAD_DIM]
         l_i += tl.sum(p_ij, axis=1)                                               # [BM]
         m_i = m_new
         # --- END OF STUDENT IMPLEMENTATION ---
@@ -121,7 +121,7 @@ def _flash_attention_forward_gqa_kernel(
 
         p_ij = tl.exp2(s_ij - m_new[:, None])                                     # [BM, BN]
 
-        acc += tl.dot(p_ij, v_block.to(tl.float32))                # [BM, D]
+        acc += tl.dot(p_ij.to(tl.float16), v_block.to(tl.float16)).to(tl.float32) # [BLOCK_M, HEAD_DIM]
         l_i += tl.sum(p_ij, axis=1)                                               # [BM]
         m_i = m_new
         # --- END OF STUDENT IMPLEMENTATION ---

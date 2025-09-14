@@ -57,7 +57,127 @@ def _flash_attention_forward_swa_kernel(
     # 1. Phase 0: Sink blocks that are before the sliding window
     # 2. Phase 1: Off-Diagonal Blocks (within the window)
     # 3. Phase 2: Diagonal Blocks
-    pass
+    d = tl.arange(0, HEAD_DIM)
+    tl.multiple_of(d, 16)
+    tl.max_contiguous(d, 16)
+
+    q0 = q_block_idx * BLOCK_M
+
+    # 滑窗起点：q0-(W-1)，并至少从 SINK_SIZE 后开始（避免和 sink 重复）
+    k_min = tl.maximum(0, q0 - (WINDOW_SIZE - 1))
+    k_min = tl.maximum(k_min, SINK_SIZE)                    # 窗口不覆盖 sink 段
+    window_start = (k_min // BLOCK_N) * BLOCK_N             # 块对齐
+    window_start = tl.minimum(window_start, q0)
+
+    # =============== Phase 0: SINK（只处理 [0, SINK_SIZE)） ===============
+    sink_blocks = (SINK_SIZE + BLOCK_N - 1) // BLOCK_N
+    for sink_block_idx in range(sink_blocks):
+        start_n = sink_block_idx * BLOCK_N
+        k_offsets = start_n + tl.arange(0, BLOCK_N)
+
+        k_ptrs = K_ptr + batch_idx * k_stride_b + kv_head_idx * k_stride_h + \
+                 (k_offsets[None, :] * k_stride_s + d[:, None])
+        v_ptrs = V_ptr + batch_idx * v_stride_b + kv_head_idx * v_stride_h + \
+                 (k_offsets[:, None] * v_stride_s + d[None, :])
+
+        k_block = tl.load(k_ptrs, mask=(k_offsets[None, :] < SEQ_LEN), other=0.0)
+        v_block = tl.load(v_ptrs, mask=(k_offsets[:, None] < SEQ_LEN), other=0.0).to(tl.float32)
+
+        s_ij = tl.dot(q_block, k_block) * qk_scale
+
+        # sink 仅做：越界 + 因果（k <= q）+ k < SINK_SIZE
+        keep = (k_offsets[None, :] < SEQ_LEN) & \
+               (k_offsets[None, :] <= q_offsets[:, None]) & \
+               (k_offsets[None, :] < SINK_SIZE)
+        s_ij = tl.where(keep, s_ij, -float("inf"))
+
+        neg_inf = -float("inf")
+        m_ij = tl.max(s_ij, axis=1)
+        m_new = tl.maximum(m_i, m_ij)
+
+        # 空 tile 特判（避免 -inf - -inf）
+        no_valid = (m_ij == neg_inf) & (m_i == neg_inf)
+        alpha = tl.where(no_valid, 1.0, tl.exp2(m_i - m_new))
+        l_i = l_i * alpha
+        acc = acc * alpha[:, None]
+
+        p_ij = tl.where(no_valid[:, None], 0.0, tl.exp2(s_ij - m_new[:, None]))
+        acc += tl.dot(p_ij.to(tl.float16), v_block.to(tl.float16)).to(tl.float32) # [BLOCK_M, HEAD_DIM]
+        l_i += tl.sum(p_ij, axis=1)
+        m_i = tl.where(no_valid, m_i, m_new)
+
+    # ===== Phase 1: 窗口内的非对角块（范围 [window_start, q0)；明确排除 sink） =====
+    for start_n in range(window_start, q0, BLOCK_N):
+        k_offsets = start_n + tl.arange(0, BLOCK_N)
+
+        k_ptrs = K_ptr + batch_idx * k_stride_b + kv_head_idx * k_stride_h + \
+                 (k_offsets[None, :] * k_stride_s + d[:, None])
+        v_ptrs = V_ptr + batch_idx * v_stride_b + kv_head_idx * v_stride_h + \
+                 (k_offsets[:, None] * v_stride_s + d[None, :])
+
+        k_block = tl.load(k_ptrs, mask=(k_offsets[None, :] < SEQ_LEN), other=0.0)
+        v_block = tl.load(v_ptrs, mask=(k_offsets[:, None] < SEQ_LEN), other=0.0).to(tl.float32)
+
+        s_ij = tl.dot(q_block, k_block) * qk_scale
+
+        causal = (k_offsets[None, :] <= q_offsets[:, None])
+        in_window = (k_offsets[None, :] >= (q_offsets[:, None] - (WINDOW_SIZE - 1)))
+        non_sink = (k_offsets[None, :] >= SINK_SIZE)
+        keep = (k_offsets[None, :] < SEQ_LEN) & causal & in_window & non_sink
+        s_ij = tl.where(keep, s_ij, -float("inf"))
+
+        neg_inf = -float("inf")
+        m_ij = tl.max(s_ij, axis=1)
+        m_new = tl.maximum(m_i, m_ij)
+
+        no_valid = (m_ij == neg_inf) & (m_i == neg_inf)
+        alpha = tl.where(no_valid, 1.0, tl.exp2(m_i - m_new))
+        l_i = l_i * alpha
+        acc = acc * alpha[:, None]
+
+        p_ij = tl.where(no_valid[:, None], 0.0, tl.exp2(s_ij - m_new[:, None]))
+        acc += tl.dot(p_ij.to(tl.float16), v_block.to(tl.float16)).to(tl.float32) # [BLOCK_M, HEAD_DIM]
+        l_i += tl.sum(p_ij, axis=1)
+        m_i = tl.where(no_valid, m_i, m_new)
+
+    # =============== Phase 2: 对角块（宽度 <= min(BLOCK_M, WINDOW_SIZE)） ===============
+    diag_start = q0
+    max_k_span = WINDOW_SIZE if WINDOW_SIZE < BLOCK_M else BLOCK_M
+    n_diag_iters = (max_k_span + BLOCK_N - 1) // BLOCK_N
+
+    for it in range(n_diag_iters):
+        start_n = diag_start + it * BLOCK_N
+        k_offsets = start_n + tl.arange(0, BLOCK_N)
+
+        k_ptrs = K_ptr + batch_idx * k_stride_b + kv_head_idx * k_stride_h + \
+                 (k_offsets[None, :] * k_stride_s + d[:, None])
+        v_ptrs = V_ptr + batch_idx * v_stride_b + kv_head_idx * v_stride_h + \
+                 (k_offsets[:, None] * v_stride_s + d[None, :])
+
+        k_block = tl.load(k_ptrs, mask=(k_offsets[None, :] < SEQ_LEN), other=0.0)
+        v_block = tl.load(v_ptrs, mask=(k_offsets[:, None] < SEQ_LEN), other=0.0).to(tl.float32)
+
+        s_ij = tl.dot(q_block, k_block) * qk_scale
+
+        causal = (k_offsets[None, :] <= q_offsets[:, None])
+        in_window = (k_offsets[None, :] >= (q_offsets[:, None] - (WINDOW_SIZE - 1)))
+        non_sink = (k_offsets[None, :] >= SINK_SIZE)  # sink 已在 Phase 0 处理
+        keep = (k_offsets[None, :] < SEQ_LEN) & causal & in_window & non_sink
+        s_ij = tl.where(keep, s_ij, -float("inf"))
+
+        neg_inf = -float("inf")
+        m_ij = tl.max(s_ij, axis=1)
+        m_new = tl.maximum(m_i, m_ij)
+
+        no_valid = (m_ij == neg_inf) & (m_i == neg_inf)
+        alpha = tl.where(no_valid, 1.0, tl.exp2(m_i - m_new))
+        l_i = l_i * alpha
+        acc = acc * alpha[:, None]
+
+        p_ij = tl.where(no_valid[:, None], 0.0, tl.exp2(s_ij - m_new[:, None]))
+        acc += tl.dot(p_ij.to(tl.float16), v_block.to(tl.float16)).to(tl.float32)
+        l_i += tl.sum(p_ij, axis=1)
+        m_i = tl.where(no_valid, m_i, m_new)
     # --- END OF STUDENT IMPLEMENTATION ---
 
     # 4. Normalize and write the final output block.

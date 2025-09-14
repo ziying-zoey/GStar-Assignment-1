@@ -99,7 +99,7 @@ def _flash_attention_forward_swa_kernel(
 
         p_ij = tl.where(no_valid[:, None], 0.0, tl.exp2(s_ij - m_new[:, None]))  # [BM, BN]
 
-        acc += tl.dot(p_ij, v_block.to(tl.float32))
+        acc += tl.dot(p_ij.to(tl.float16), v_block.to(tl.float16)).to(tl.float32) # [BLOCK_M, HEAD_DIM]
         l_i += tl.sum(p_ij, axis=1)
         m_i = tl.where(no_valid, m_i, m_new)  # 无合法时保持 m_i 不变
 
@@ -134,7 +134,7 @@ def _flash_attention_forward_swa_kernel(
         acc = acc * alpha[:, None]
 
         p_ij = tl.exp2(s_ij - m_new[:, None])
-        acc += tl.dot(p_ij, v_block.to(tl.float32))
+        acc += tl.dot(p_ij.to(tl.float16), v_block.to(tl.float16)).to(tl.float32) # [BLOCK_M, HEAD_DIM]
         l_i += tl.sum(p_ij, axis=1)
         m_i = m_new
     # --- END OF SWA IMPLEMENTATION ---

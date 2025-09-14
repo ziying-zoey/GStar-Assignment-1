@@ -80,7 +80,7 @@ def _flash_attention_forward_kernel(
         p_ij = tl.exp2(s_ij - m_new[:, None]) # [BLOCK_M, BLOCK_N]
 
         # 4. Update the accumulator `acc` using `p_ij` and `v_block`.
-        acc += tl.dot(p_ij.to(tl.float32), v_block.to(tl.float32)) # [BLOCK_M, HEAD_DIM]
+        acc += tl.dot(p_ij.to(tl.float16), v_block.to(tl.float16)).to(tl.float32) # [BLOCK_M, HEAD_DIM]
 
         # 5. Update the denominator `l_i`.
         l_i += tl.sum(p_ij, axis=1) # [BLOCK_M]

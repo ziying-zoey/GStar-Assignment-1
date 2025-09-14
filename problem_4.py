@@ -81,7 +81,8 @@ def _flash_attention_forward_causal_kernel(
         p_ij = tl.exp2(s_ij - m_new[:, None])                                     # [BM, BN]
         p_ij = tl.where(k_mask[None, :], p_ij, 0.0)
 
-        acc += tl.dot(p_ij.to(tl.float32), v_block.to(tl.float32))                # [BM, D]
+        # acc += tl.dot(p_ij.to(tl.float32), v_block.to(tl.float32))                # [BM, D]
+        acc += tl.dot(p_ij.to(tl.float16), v_block.to(tl.float16)).to(tl.float32) # [BLOCK_M, HEAD_DIM]
         l_i += tl.sum(p_ij, axis=1)                                               # [BM]
         m_i = m_new
 
@@ -119,7 +120,7 @@ def _flash_attention_forward_causal_kernel(
         acc = acc * alpha[:, None]                                                # [BM, D]
         p_ij = tl.where(keep, tl.exp2(s_ij - m_new[:, None]), 0.0)
 
-        acc += tl.dot(p_ij.to(tl.float32), v_block.to(tl.float32))                # [BM, D]
+        acc += tl.dot(p_ij.to(tl.float16), v_block.to(tl.float16)).to(tl.float32) # [BLOCK_M, HEAD_DIM]
         l_i += tl.sum(p_ij, axis=1)                                               # [BM]
         m_i = m_new
 
