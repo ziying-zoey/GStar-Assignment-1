@@ -63,13 +63,31 @@ def _flash_attention_forward_kernel(
 
         # --- STUDENT IMPLEMENTATION REQUIRED HERE ---
         # Implement the online softmax update logic.
+        k_mask = k_offsets < SEQ_LEN
+        neg_inf = -float('inf')
+        s_ij = tl.where(k_mask[None, :], s_ij, neg_inf)
         # 1. Find the new running maximum (`m_new`).
+        m_ij = tl.max(s_ij, axis=1) # 注：这里的s_ij已经换算到 log2空间了 # [BLOCK_M]
+        m_new = tl.maximum(m_ij, m_i) # [BLOCK_M]
+
         # 2. Rescale the existing accumulator (`acc`) and denominator (`l_i`).
+        # 使用 exp2，因为前面把分数乘了 log2(e)：exp(x) == exp2(x * log2(e))
+        alpha = tl.exp2(m_i - m_new) # [BLOCK_M]
+        l_i = l_i * alpha # [BLOCK_M]
+        acc = acc * alpha[:, None] # [BLOCK_M, HEAD_DIM]
+
         # 3. Compute the attention probabilities for the current tile (`p_ij`).
+        p_ij = tl.exp2(s_ij - m_new[:, None]) # [BLOCK_M, BLOCK_N]
+
         # 4. Update the accumulator `acc` using `p_ij` and `v_block`.
+        acc += tl.dot(p_ij.to(tl.float32), v_block.to(tl.float32)) # [BLOCK_M, HEAD_DIM]
+
         # 5. Update the denominator `l_i`.
+        l_i += tl.sum(p_ij, axis=1) # [BLOCK_M]
+
         # 6. Update the running maximum `m_i` for the next iteration.
-        pass
+        m_i = m_new # [BLOCK_M]
+
         # --- END OF STUDENT IMPLEMENTATION ---
 
 
