@@ -30,20 +30,28 @@ class FlashAttention2Function(torch.autograd.Function):
         # Main loops: Iterate over each batch and head
         for b in range(B):
             for h in range(H):
-                Q_bh = Q[b, h, :, :]
-                K_bh = K[b, h, :, :]
-                V_bh = V[b, h, :, :]
+                Q_bh = Q[b, h, :, :] # [N_Q, D_H]
+                K_bh = K[b, h, :, :] # [N_K, D_H]
+                V_bh = V[b, h, :, :] # [N_K, D_H]
 
                 # Loop over query tiles
                 for i in range(N_Q_tiles):
                     q_start = i * Q_TILE_SIZE
                     q_end = min((i + 1) * Q_TILE_SIZE, N_Q)
-                    Q_tile = Q_bh[q_start:q_end, :]
+                    Q_tile = Q_bh[q_start:q_end, :] # [q_len, D_H]
 
                     # Initialize accumulators for this query tile
-                    o_i = torch.zeros_like(Q_tile, dtype=Q.dtype)
-                    l_i = torch.zeros(q_end - q_start, device=Q.device, dtype=torch.float32)
-                    m_i = torch.full((q_end - q_start,), -float('inf'), device=Q.device, dtype=torch.float32)
+                    # o_i = torch.zeros_like(Q_tile, dtype=Q.dtype)
+                    # l_i = torch.zeros(q_end - q_start, device=Q.device, dtype=torch.float32)
+                    # m_i = torch.full((q_end - q_start,), -float('inf'), device=Q.device, dtype=torch.float32)
+                    # 在线 softmax 累加器（用 float32 更稳）
+                    q_len   = q_end - q_start
+                    o_i = torch.zeros((q_len, D_H), device=Q.device, dtype=torch.float32)  # 未归一分子
+                    l_i = torch.zeros(q_len, device=Q.device, dtype=torch.float32)         # 未归一分母
+                    m_i = torch.full((q_len,), -float('inf'), device=Q.device, dtype=torch.float32)  # 运行最大
+
+                    if is_causal:
+                        q_abs_idx = torch.arange(q_start, q_end, device=Q.device)  # [q_len]
 
                     # Inner loop over key/value tiles
                     for j in range(N_K_tiles):
@@ -54,32 +62,52 @@ class FlashAttention2Function(torch.autograd.Function):
                         V_tile = V_bh[k_start:k_end, :]
                         
                         S_ij = (Q_tile @ K_tile.transpose(-1, -2)) * scale
+                        S_ij = S_ij.to(torch.float32)  # [q_len, k_len]
                         
                         # --- STUDENT IMPLEMENTATION REQUIRED HERE ---
                         # 1. Apply causal masking if is_causal is True.
-                        #
+                        if is_causal:
+                            k_abs_idx = torch.arange(k_start, k_end, device=Q.device)  # [k_len]
+                            causal_mask = k_abs_idx.unsqueeze(0) > q_abs_idx.unsqueeze(1)  # [q_len, k_len]
+                            S_ij = S_ij.masked_fill(causal_mask, float('-inf'))
+
                         # 2. Compute the new running maximum
-                        #
-                        # 3. Rescale the previous accumulators (o_i, l_i)
-                        #
+                        m_ij = torch.amax(S_ij, dim=-1)          
+                        m_new = torch.maximum(m_i, m_ij)         # [q_len]
+
+                        # 3. Rescale the previous accumulators (o_i, l_i) 重新标定旧累加器
+                        alpha = torch.exp(m_i - m_new)           # [q_len] exp(-inf)=0
+                        l_i = l_i * alpha
+                        o_i = o_i * alpha.unsqueeze(-1)
+
                         # 4. Compute the probabilities for the current tile, P_tilde_ij = exp(S_ij - m_new).
-                        #
+                        P_tilde = torch.exp(S_ij - m_new.unsqueeze(-1))  # [q_len, k_len]
+                        # 被 mask 的位置 S_ij=-inf → exp(-inf)=0，自然不贡献
+
                         # 5. Accumulate the current tile's contribution to the accumulators to update l_i and o_i
-                        #
+                        l_i = l_i + torch.sum(P_tilde, dim=-1)                       # [q_len]
+                        o_i = o_i + (P_tilde @ V_tile.to(torch.float32))             # [q_len, D_H]
+
                         # 6. Update the running max for the next iteration
-                        
+                        m_i = m_new
                         # --- END OF STUDENT IMPLEMENTATION ---
 
                     # After iterating through all key tiles, normalize the output
                     # This part is provided for you. It handles the final division safely.
-                    l_i_reciprocal = torch.where(l_i > 0, 1.0 / l_i, 0)
-                    o_i_normalized = o_i * l_i_reciprocal.unsqueeze(-1)
-                    
-                    L_tile = m_i + torch.log(l_i)
+                    # l_i_reciprocal = torch.where(l_i > 0, 1.0 / l_i, 0)
+                    # o_i_normalized = o_i * l_i_reciprocal.unsqueeze(-1)
+                    # L_tile = m_i + torch.log(l_i)
+
+                    safe_l_i = torch.clamp(l_i, min=torch.finfo(l_i.dtype).tiny)
+                    o_i_normalized = o_i * (1.0 / safe_l_i).unsqueeze(-1)            # [q_len, D_H]
+                    L_tile = m_i + torch.log(safe_l_i)                                # [q_len]
+
                     
                     # Write results for this tile back to the final output tensors
-                    O_final[b, h, q_start:q_end, :] = o_i_normalized
-                    L_final[b, h, q_start:q_end] = L_tile
+                    # O_final[b, h, q_start:q_end, :] = o_i_normalized
+                    # L_final[b, h, q_start:q_end] = L_tile
+                    O_final[b, h, q_start:q_end, :] = o_i_normalized.to(O_final.dtype)
+                    L_final[b, h, q_start:q_end]   = L_tile
         
         O_final = O_final.to(Q.dtype)
 
