@@ -1,0 +1,171 @@
+===== ENV INFO =====
+DATE: Sun 14 Sep 2025 02:50:45 PM CST
+HOST: hpclab04
+PYTHON: Python 3.10.18
+/data/jiangjunmin/conda/envs/gstar/lib/python3.10/site-packages/torch/_subclasses/functional_tensor.py:295: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at ../torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+TORCH: 2.5.1+cu121
+TRITON: 3.1.0
+CUDA available: True
+CUDA device: NVIDIA A800 80GB PCIe
+GIT HEAD: 384afa8
+
+===== RUNNING AUTOGRADER (P1-P7) =====
+/data/jiangjunmin/conda/envs/gstar/lib/python3.10/site-packages/torch/_subclasses/functional_tensor.py:295: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at ../torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+
+--- Running Autograder for Problem 1: Tiled Flash Attention ---
+✅ P1 Correctness Test Passed! (B=1, H=8, Nq=512, Nk=512, D=16, Causal=False)
+✅ P1 Correctness Test Passed! (B=1, H=8, Nq=1024, Nk=1024, D=16, Causal=True)
+✅ P1 Correctness Test Passed! (B=1, H=16, Nq=2048, Nk=2048, D=16, Causal=True)
+✅ P1 Correctness Test Passed! (B=1, H=16, Nq=4096, Nk=4096, D=16, Causal=True)
+
+All P1 correctness tests passed!
+
+--- Running Autograder for Problem 2: Triton Weighted Row-Sum ---
+✅ P2 Correctness Test Passed! (Rows=512, Cols=1024)
+✅ P2 Correctness Test Passed! (Rows=1024, Cols=4096)
+✅ P2 Correctness Test Passed! (Rows=2048, Cols=8192)
+✅ P2 Correctness Test Passed! (Rows=4096, Cols=8192)
+
+All P2 correctness tests passed!
+
+--- Running Autograder for Problem 3: Non-Causal Flash Attention ---
+✅ P3 Correctness Test Passed! (B=1, H=8, L=512, D=16)
+✅ P3 Correctness Test Passed! (B=1, H=8, L=1024, D=16)
+✅ P3 Correctness Test Passed! (B=1, H=16, L=2048, D=16)
+✅ P3 Correctness Test Passed! (B=1, H=16, L=4096, D=16)
+
+All P3 correctness tests passed!
+
+--- Running Performance Benchmark ---
+Benchmark Config: B=1, H=16, L=4096, D=16, Causal=False
+
+--- Benchmark Results ---
+Implementation            | Avg Time (ms)        | Peak Memory (GB)    
+----------------------------------------------------------------------
+PyTorch (Naive)           | 10.9207              | 3.0162              
+Triton (Flash)            | 0.2218               | 0.0157              
+----------------------------------------------------------------------
+Triton is 49.25x faster than PyTorch (Naive).
+Triton uses 191.54x less memory.
+
+--- Running Autograder for Problem 4: Causal Flash Attention ---
+✅ P4 Correctness Test Passed! (B=1, H=8, L=512, D=16)
+✅ P4 Correctness Test Passed! (B=1, H=8, L=1024, D=16)
+✅ P4 Correctness Test Passed! (B=1, H=16, L=2048, D=16)
+✅ P4 Correctness Test Passed! (B=1, H=16, L=4096, D=16)
+
+All P4 correctness tests passed!
+
+--- Running Performance Benchmark ---
+Benchmark Config: B=1, H=16, L=4096, D=16, Causal=True
+
+--- Benchmark Results ---
+Implementation            | Avg Time (ms)        | Peak Memory (GB)    
+----------------------------------------------------------------------
+PyTorch (Naive)           | 12.7955              | 3.0319              
+Triton (Flash)            | 0.2063               | 0.0157              
+----------------------------------------------------------------------
+Triton is 62.02x faster than PyTorch (Naive).
+Triton uses 192.53x less memory.
+
+--- Running Autograder for Problem 5: Grouped-Query Attention ---
+✅ P5 Correctness Test Passed! (B=1, Hq=8, Hkv=2, L=512, D=16)
+✅ P5 Correctness Test Passed! (B=1, Hq=8, Hkv=2, L=1024, D=16)
+✅ P5 Correctness Test Passed! (B=1, Hq=16, Hkv=2, L=2048, D=16)
+✅ P5 Correctness Test Passed! (B=1, Hq=16, Hkv=2, L=4096, D=16)
+
+All P5 correctness tests passed!
+
+--- Running Performance Benchmark ---
+Benchmark Config: B=1, Hq=16, Hkv=2, L=4096, D=16, Causal=True
+
+--- Benchmark Results ---
+Implementation            | Avg Time (ms)        | Peak Memory (GB)    
+----------------------------------------------------------------------
+PyTorch (Naive)           | 12.7994              | 3.0323              
+Triton (Flash)            | 0.1678               | 0.0123              
+----------------------------------------------------------------------
+Triton is 76.30x faster than PyTorch (Naive).
+Triton uses 245.95x less memory.
+
+--- Running Autograder for Problem 6: Sliding Window Attention ---
+✅ P6 Correctness Test Passed! (B=1, Hq=8, Hkv=2, L=512, D=16, W=128)
+✅ P6 Correctness Test Passed! (B=1, Hq=8, Hkv=2, L=1024, D=16, W=128)
+✅ P6 Correctness Test Passed! (B=1, Hq=16, Hkv=2, L=2048, D=16, W=128)
+✅ P6 Correctness Test Passed! (B=1, Hq=16, Hkv=2, L=4096, D=16, W=128)
+
+All P6 correctness tests passed!
+
+--- Running Performance Benchmark ---
+Benchmark Config: B=1, Hq=16, Hkv=2, L=4096, D=16, W=128, Causal=True
+
+--- Benchmark Results ---
+Implementation            | Avg Time (ms)        | Peak Memory (GB)    
+----------------------------------------------------------------------
+PyTorch (Naive)           | 12.9381              | 3.0323              
+Triton (Flash)            | 0.0376               | 0.0123              
+----------------------------------------------------------------------
+Triton is 344.22x faster than PyTorch (Naive).
+Triton uses 245.95x less memory.
+
+--- Running Autograder for Problem 7: Attention Sinks ---
+✅ P7 Correctness Test Passed! (B=1, Hq=8, Hkv=2, L=512, D=32, W=128, S=8)
+✅ P7 Correctness Test Passed! (B=1, Hq=8, Hkv=2, L=1024, D=32, W=128, S=8)
+✅ P7 Correctness Test Passed! (B=1, Hq=16, Hkv=2, L=2048, D=16, W=128, S=8)
+✅ P7 Correctness Test Passed! (B=1, Hq=16, Hkv=2, L=4096, D=16, W=128, S=8)
+
+All P7 correctness tests passed!
+
+--- Running Performance Benchmark ---
+Benchmark Config: B=1, Hq=16, Hkv=2, L=4096, D=16, W=128, S=8, Causal=True
+
+--- Benchmark Results ---
+Implementation            | Avg Time (ms)        | Peak Memory (GB)    
+----------------------------------------------------------------------
+PyTorch (Naive)           | 12.9337              | 3.0323              
+Triton (Flash)            | 0.0404               | 0.0123              
+----------------------------------------------------------------------
+Triton is 319.86x faster than PyTorch (Naive).
+Triton uses 245.95x less memory.
+
+===== RUNNING OPTIONAL AUTOGRADER (P8-P9) =====
+/data/jiangjunmin/conda/envs/gstar/lib/python3.10/site-packages/torch/_subclasses/functional_tensor.py:295: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at ../torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+
+--- Running Autograder for Problem 8: GQA Backward Pass ---
+Running test case: batch=1, heads_q=16, heads_kv=16, seq_len=4096, dim=16
+✅ Forward Pass Results match
+✅ Backward Pass Results match on dQ
+✅ Backward Pass Results match on dK
+✅ Backward Pass Results match on dV
+Running test case: batch=1, heads_q=16, heads_kv=8, seq_len=4096, dim=16
+✅ Forward Pass Results match
+✅ Backward Pass Results match on dQ
+✅ Backward Pass Results match on dK
+✅ Backward Pass Results match on dV
+Running test case: batch=1, heads_q=16, heads_kv=1, seq_len=4096, dim=16
+✅ Forward Pass Results match
+✅ Backward Pass Results match on dQ
+✅ Backward Pass Results match on dK
+✅ Backward Pass Results match on dV
+
+--- Running Autograder for Problem 9: GQA + SWDA + Attention Sinks Backward Pass ---
+Running test case: batch=1, heads_q=16, heads_kv=16, seq_len=4096, dim=16, window_size=256, sink_size=4
+✅ Forward Pass Results match
+✅ Backward Pass Results match on dQ
+✅ Backward Pass Results match on dK
+✅ Backward Pass Results match on dV
+Running test case: batch=1, heads_q=16, heads_kv=8, seq_len=4096, dim=16, window_size=256, sink_size=4
+✅ Forward Pass Results match
+✅ Backward Pass Results match on dQ
+✅ Backward Pass Results match on dK
+✅ Backward Pass Results match on dV
+Running test case: batch=1, heads_q=16, heads_kv=1, seq_len=4096, dim=16, window_size=256, sink_size=4
+✅ Forward Pass Results match
+✅ Backward Pass Results match on dQ
+✅ Backward Pass Results match on dK
+✅ Backward Pass Results match on dV
+
+===== DONE =====
