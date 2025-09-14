@@ -1,9 +1,6 @@
 ===== ENV INFO =====
 DATE: Sun 14 Sep 2025 02:50:45 PM CST
-HOST: hpclab04
 PYTHON: Python 3.10.18
-/data/jiangjunmin/conda/envs/gstar/lib/python3.10/site-packages/torch/_subclasses/functional_tensor.py:295: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at ../torch/csrc/utils/tensor_numpy.cpp:84.)
-  cpu = _conversion_method_template(device=torch.device("cpu"))
 TORCH: 2.5.1+cu121
 TRITON: 3.1.0
 CUDA available: True
@@ -11,9 +8,6 @@ CUDA device: NVIDIA A800 80GB PCIe
 GIT HEAD: 384afa8
 
 ===== RUNNING AUTOGRADER (P1-P7) =====
-/data/jiangjunmin/conda/envs/gstar/lib/python3.10/site-packages/torch/_subclasses/functional_tensor.py:295: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at ../torch/csrc/utils/tensor_numpy.cpp:84.)
-  cpu = _conversion_method_template(device=torch.device("cpu"))
-
 --- Running Autograder for Problem 1: Tiled Flash Attention ---
 ✅ P1 Correctness Test Passed! (B=1, H=8, Nq=512, Nk=512, D=16, Causal=False)
 ✅ P1 Correctness Test Passed! (B=1, H=8, Nq=1024, Nk=1024, D=16, Causal=True)
@@ -131,8 +125,6 @@ Triton is 319.86x faster than PyTorch (Naive).
 Triton uses 245.95x less memory.
 
 ===== RUNNING OPTIONAL AUTOGRADER (P8-P9) =====
-/data/jiangjunmin/conda/envs/gstar/lib/python3.10/site-packages/torch/_subclasses/functional_tensor.py:295: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at ../torch/csrc/utils/tensor_numpy.cpp:84.)
-  cpu = _conversion_method_template(device=torch.device("cpu"))
 
 --- Running Autograder for Problem 8: GQA Backward Pass ---
 Running test case: batch=1, heads_q=16, heads_kv=16, seq_len=4096, dim=16
