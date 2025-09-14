@@ -34,9 +34,9 @@ def _flash_attention_forward_gqa_kernel(
     # --- STUDENT IMPLEMENTATION REQUIRED HERE (Part 1) ---
     # Your goal is to map the current query head (q_head_idx) to its corresponding shared key/value head (kv_head_idx).
     # 1. Calculate how many query heads are in each group.
+    group_size = N_Q_HEADS // N_KV_HEADS
     # 2. Use integer division to find the correct kv_head_idx.
-    
-    kv_head_idx = 0 # Placeholder: Replace with your calculation
+    kv_head_idx = q_head_idx // group_size
     # --- END OF STUDENT IMPLEMENTATION ---
 
 
@@ -53,13 +53,42 @@ def _flash_attention_forward_gqa_kernel(
     
     qk_scale = softmax_scale * 1.44269504
     
+    d = tl.arange(0, HEAD_DIM)
     # --- Phase 1: Off-Diagonal Blocks ---
     for start_n in range(0, q_block_idx * BLOCK_M, BLOCK_N):
         # --- STUDENT IMPLEMENTATION REQUIRED HERE (Part 2) ---
         # 1. Modify the pointer arithmetic for K and V to use your `kv_head_idx`.
         # 2. Reuse your working implementation for the online softmax update
         #    from your solution to Problem 4.
-        pass
+        k_offsets = start_n + tl.arange(0, BLOCK_N)                               # [BN]
+        k_ptrs = K_ptr + batch_idx * k_stride_b + kv_head_idx * k_stride_h + \
+                 (k_offsets[None, :] * k_stride_s + d[:, None])
+        v_ptrs = V_ptr + batch_idx * v_stride_b + kv_head_idx * v_stride_h + \
+                 (k_offsets[:, None] * v_stride_s + d[None, :])
+
+        # k_block = tl.load(k_ptrs, mask=k_offsets[None, :] < SEQ_LEN, other=0.0)   # [D, BN]
+        # v_block = tl.load(v_ptrs, mask=k_offsets[:, None] < SEQ_LEN, other=0.0)   # [BN, D]
+        k_block = tl.load(k_ptrs, mask=k_offsets[None, :] < SEQ_LEN, other=0.0, cache_modifier=".cg")   # [D, BN]
+        v_block = tl.load(v_ptrs, mask=k_offsets[:, None] < SEQ_LEN, other=0.0, cache_modifier=".cg")   # [BN, D]
+
+        s_ij = tl.dot(q_block, k_block)                                           # [BM, BN]
+        s_ij *= qk_scale
+
+        keep = (k_offsets[None, :] < SEQ_LEN)                                     # mask
+        s_ij = tl.where(keep, s_ij, -float("inf"))
+
+        m_ij = tl.max(s_ij, axis=1)                                               # [BM]
+        m_new = tl.maximum(m_i, m_ij)                                             # [BM]
+
+        alpha = tl.exp2(m_i - m_new)                                              # [BM]
+        l_i *= alpha
+        acc *= alpha[:, None]
+
+        p_ij = tl.exp2(s_ij - m_new[:, None])                                     # [BM, BN]
+
+        acc += tl.dot(p_ij, v_block.to(tl.float32))                # [BM, D]
+        l_i += tl.sum(p_ij, axis=1)                                               # [BM]
+        m_i = m_new
         # --- END OF STUDENT IMPLEMENTATION ---
 
     # --- Phase 2: Diagonal Blocks ---
@@ -69,7 +98,32 @@ def _flash_attention_forward_gqa_kernel(
         # 1. Modify the pointer arithmetic for K and V to use your `kv_head_idx`.
         # 2. Reuse your working implementation for the masked online softmax
         #    update from your solution to Problem 4.
-        pass
+        k_offsets = start_n + tl.arange(0, BLOCK_N)
+        k_ptrs = K_ptr + batch_idx * k_stride_b + kv_head_idx * k_stride_h + \
+                 (k_offsets[None, :] * k_stride_s + d[:, None])
+        v_ptrs = V_ptr + batch_idx * v_stride_b + kv_head_idx * v_stride_h + \
+                 (k_offsets[:, None] * v_stride_s + d[None, :])
+
+        k_block = tl.load(k_ptrs, mask=k_offsets[None, :] < SEQ_LEN, other=0.0)   # [D, BN]
+        v_block = tl.load(v_ptrs, mask=k_offsets[:, None] < SEQ_LEN, other=0.0)   # [BN, D]
+
+        s_ij = tl.dot(q_block, k_block)                                           # [BM, BN]
+        s_ij *= qk_scale
+        keep = (k_offsets[None, :] < SEQ_LEN) & (k_offsets[None, :] <= q_offsets[:, None])
+        s_ij = tl.where(keep, s_ij, -float("inf"))
+
+        m_ij = tl.max(s_ij, axis=1)                                               # [BM]
+        m_new = tl.maximum(m_i, m_ij)                                             # [BM]
+
+        alpha = tl.exp2(m_i - m_new)                                              # [BM]
+        l_i = l_i * alpha
+        acc = acc * alpha[:, None]
+
+        p_ij = tl.exp2(s_ij - m_new[:, None])                                     # [BM, BN]
+
+        acc += tl.dot(p_ij, v_block.to(tl.float32))                # [BM, D]
+        l_i += tl.sum(p_ij, axis=1)                                               # [BM]
+        m_i = m_new
         # --- END OF STUDENT IMPLEMENTATION ---
 
     # 4. Normalize and write the final output block.
